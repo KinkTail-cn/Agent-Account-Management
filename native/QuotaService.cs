@@ -18,6 +18,7 @@ namespace KeyIsle
     internal sealed class QuotaReply
     {
         public string state, message, auth = "unknown";
+        public string quotaAuth;
         public QuotaReport report;
         public long checkedAt;
     }
@@ -58,6 +59,12 @@ namespace KeyIsle
         private static QuotaReply Query(string id, string client, string login, bool refresh, CancellationToken token)
         {
             var reply = new QuotaReply { report = QuotaData.Cached(id, client) };
+            bool google = AntigravityLogin.IsGoogle(client);
+            if (google)
+            {
+                try { reply.auth = "desktop-" + WebQuota.GoogleWindowIdentity(id, client, login); }
+                catch (Exception) { reply.auth = "desktop-unknown"; }
+            }
             try
             {
                 QuotaReport report;
@@ -90,17 +97,11 @@ namespace KeyIsle
                     case "antigravity-ide":
                     case "antigravity-app":
                         if (!File.Exists(Path.Combine(AntigravityLogin.Active(id, client), "quota-enabled")))
-                            throw new QuotaException("link", "首次登录会打开此账号专属的 Google 授权窗口。");
-                        string windowIdentity = refresh ? WebQuota.GoogleWindowIdentity(id, client, login) : "unknown";
-                        if (windowIdentity == "mismatch") throw new QuotaException("mismatch", "桌面客户端仍显示其他账号，请重新登录此账号。");
+                            throw new QuotaException("link", "可为此账号授权额度查询。");
                         if (!refresh && reply.report == null)
                             throw new QuotaException("waiting", "完成额度授权后，请点击刷新。");
                         report = ReadAntigravity(id, client, token);
-                        if (report.windows.Count > 0)
-                        {
-                            reply.auth = windowIdentity == "in" ? "in" : "quotaAuthorized";
-                            if (windowIdentity != "in") reply.message = "可在客户端展开账号菜单后刷新，核对桌面登录身份。";
-                        }
+                        if (report.windows.Count > 0) reply.quotaAuth = "authorized";
                         break;
                     case "chatgpt-desktop":
                     case "codex-cli":
@@ -117,10 +118,14 @@ namespace KeyIsle
             {
                 reply.state = error.State;
                 reply.message = error.Message;
-                if (error.State == "login") reply.auth = "out";
-                if (error.State == "reauth") reply.auth = "expired";
-                if (error.State == "first") reply.auth = "first";
-                if (error.State == "mismatch") reply.auth = "mismatch";
+                if (google) reply.quotaAuth = error.State == "link" || error.State == "login" || error.State == "reauth" ? "unlinked" : "unknown";
+                else
+                {
+                    if (error.State == "login") reply.auth = "out";
+                    if (error.State == "reauth") reply.auth = "expired";
+                    if (error.State == "first") reply.auth = "first";
+                    if (error.State == "mismatch") reply.auth = "mismatch";
+                }
                 if (error.State == "login" || error.State == "reauth" || error.State == "mismatch" || error.State == "plan" || error.State == "first")
                 {
                     reply.report = null;
@@ -163,7 +168,7 @@ namespace KeyIsle
             start.Arguments = "app-server --listen stdio://";
             return Run(start, 14, token, process => {
                 Rpc(process, 1, "initialize", new { clientInfo = new { name = "key_isle", title = Program.DisplayName, version = typeof(Program).Assembly.GetName().Version.ToString(3) } });
-                process.StandardInput.WriteLine("{\"method\":\"initialized\"}");
+                SendRpcLine(process, "{\"method\":\"initialized\"}");
                 var identity = Rpc(process, 2, "account/read", new { refreshToken = false });
                 object account = QuotaData.Field(identity, "account");
                 if (account == null) throw new QuotaException("login", "请先在这个账号的客户端登录 ChatGPT，再刷新额度。");
@@ -181,7 +186,7 @@ namespace KeyIsle
             var json = QuotaData.Serializer();
             var request = new Dictionary<string, object> { { "id", id }, { "method", method } };
             if (parameters != null) request["params"] = parameters;
-            process.StandardInput.WriteLine(json.Serialize(request));
+            SendRpcLine(process, json.Serialize(request));
             for (int i = 0; i < 60; i++)
             {
                 string line = BoundedLine(process.StandardOutput);
@@ -198,6 +203,15 @@ namespace KeyIsle
                 break;
             }
             throw new QuotaException("error", "Codex 没有返回额度，请检查网络和 CLI 版本。");
+        }
+
+        private static void SendRpcLine(Process process, string json)
+        {
+            // The app-server protocol is UTF-8 even when Windows uses another console code page.
+            byte[] bytes = Encoding.UTF8.GetBytes(json + "\n");
+            var stream = process.StandardInput.BaseStream;
+            stream.Write(bytes, 0, bytes.Length);
+            stream.Flush();
         }
 
         private static string BoundedLine(StreamReader reader)

@@ -42,37 +42,114 @@ namespace KeyIsle
             finally { LocalFree(args); }
         }
 
-        internal static List<IntPtr> WindowsFor(string id, string client)
+        internal static List<IntPtr> WindowsFor(string id, string client, bool includeMinimized = false)
         {
             bool google = AntigravityLogin.IsGoogle(client);
-            var profile = Path.Combine(google ? AntigravityLogin.Active(id, client) : Path.Combine(AgentSessions.ProfileRoot(id), client), "UserData");
+            var profile = Path.Combine(google ? AntigravityLogin.DesktopProfile(id, client) : Path.Combine(AgentSessions.ProfileRoot(id), client), "UserData");
             var result = new List<IntPtr>();
             if (!Directory.Exists(profile)) return result;
             var pids = new HashSet<uint>();
             // Limit the WMI query to this record's generated GUID, then check the full argument exactly.
             string image = google ? (client == "antigravity-app" ? "Name='Antigravity.exe'" : "Name='Antigravity IDE.exe'") : "(Name='chrome.exe' OR Name='msedge.exe')";
-            string query = "SELECT ProcessId, CommandLine FROM Win32_Process WHERE " + image + " AND CommandLine LIKE '%" + Guid.Parse(id).ToString("D") + "%'";
+            string expectedImage = google ? AgentSessions.InstalledPath(client) : null;
+            if (google && expectedImage == null) return result;
+            string query = "SELECT ProcessId, ExecutablePath, CommandLine FROM Win32_Process WHERE " + image + " AND CommandLine LIKE '%" + Guid.Parse(id).ToString("D") + "%'";
             using (var search = new ManagementObjectSearcher(query))
             using (var records = search.Get())
                 foreach (ManagementObject row in records)
                     using (row)
-                        if (OwnsProfile(row["CommandLine"] as string, profile)) pids.Add((uint)row["ProcessId"]);
+                        if ((!google || String.Equals(row["ExecutablePath"] as string, expectedImage, StringComparison.OrdinalIgnoreCase)) &&
+                            OwnsProfile(row["CommandLine"] as string, profile)) pids.Add((uint)row["ProcessId"]);
             if (pids.Count == 0) return result;
             EnumWindows((handle, unused) => {
                 uint pid;
                 GetWindowThreadProcessId(handle, out pid);
-                if (pids.Contains(pid) && IsWindowVisible(handle) && !IsIconic(handle)) result.Add(handle);
+                if (pids.Contains(pid) && IsWindowVisible(handle) && (includeMinimized || !IsIconic(handle))) result.Add(handle);
                 return result.Count < 12;
             }, IntPtr.Zero);
             return result;
         }
 
-        internal static string GoogleWindowIdentity(string id, string client, string expected)
+        private static readonly string[] GoogleButtons = {
+            "Continue with Google", "Sign in with Google", "使用 Google 继续", "使用 Google 登录", "使用 Google 账号继续"
+        };
+        private static readonly string[] Welcome = {
+            "Welcome to Antigravity!", "Welcome to Antigravity", "欢迎使用 Antigravity！", "欢迎使用 Antigravity"
+        };
+
+        private static Condition Named(string[] names, ControlType type)
         {
-            if (String.IsNullOrEmpty(expected) || !expected.Contains("@")) return "unknown";
-            foreach (var handle in WindowsFor(id, client))
+            return new AndCondition(new PropertyCondition(AutomationElement.ControlTypeProperty, type),
+                new OrCondition(names.Select(name => (Condition)new PropertyCondition(AutomationElement.NameProperty, name,
+                    PropertyConditionFlags.IgnoreCase)).ToArray()));
+        }
+
+        private static bool HasName(AutomationElement root, string name)
+        {
+            return root.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.NameProperty,
+                name, PropertyConditionFlags.IgnoreCase)) != null;
+        }
+
+        internal static string GoogleWindowIdentity(string id, string client, string expected, bool startSignIn = false)
+        {
+            var windows = WindowsFor(id, client);
+            if (windows.Count == 0) return "closed";
+            foreach (var handle in windows)
             {
-                var root = AutomationElement.FromHandle(handle);
+                try
+                {
+                    var result = InspectGoogleWindow(AutomationElement.FromHandle(handle), client, expected, startSignIn);
+                    if (result != "unknown") return result;
+                }
+                catch (ElementNotAvailableException) { }
+                catch (ElementNotEnabledException) { }
+                catch (System.Runtime.InteropServices.COMException) { }
+            }
+            return "unknown";
+        }
+
+        internal static string AwaitDesktop(Account account, bool login)
+        {
+            var watch = Stopwatch.StartNew();
+            var observed = "closed";
+            do
+            {
+                observed = GoogleWindowIdentity(account.id, account.agentClient, account.login, account.agentClient == "antigravity-app");
+                if (observed != "closed" && observed != "signInLoading" &&
+                    (observed != "unknown" || !login || account.agentClient != "antigravity-app")) return observed;
+                Thread.Sleep(400);
+            } while (watch.ElapsedMilliseconds < (login ? 24000 : 16000));
+            if (observed == "closed") throw new InvalidOperationException("目标账号的窗口尚未就绪，请稍后再打开客户端。");
+            return observed == "signInLoading" ? "out" : observed;
+        }
+
+        internal static string InspectGoogleWindow(AutomationElement root, string client, string expected, bool startSignIn)
+        {
+            if (client == "antigravity-app" && root.FindFirst(TreeScope.Descendants, Named(Welcome, ControlType.Text)) != null)
+            {
+                var button = root.FindFirst(TreeScope.Descendants, Named(GoogleButtons, ControlType.Button));
+                if (button != null && !button.Current.IsOffscreen)
+                {
+                    if (!startSignIn) return "out";
+                    if (!button.Current.IsEnabled) return "signInLoading";
+                    object pattern;
+                    if (button.TryGetCurrentPattern(InvokePattern.Pattern, out pattern))
+                    {
+                        ((InvokePattern)pattern).Invoke();
+                        return "signInStarted";
+                    }
+                    return "signInLoading";
+                }
+            }
+            if (client == "antigravity-app")
+            {
+                if (HasName(root, "Let's tailor the experience for you. What best describes your work?") &&
+                    HasName(root, "Software Engineering") && HasName(root, "Skip")) return "onboarding";
+                if (HasName(root, "Google Antigravity Terms of Service") &&
+                    HasName(root, "Google Privacy Policy") && HasName(root, "Continue")) return "privacy";
+            }
+            if (!String.IsNullOrWhiteSpace(expected) && expected.Contains("@"))
+            {
                 var items = root.FindAll(TreeScope.Descendants, new OrCondition(
                     new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),
                     new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text)));

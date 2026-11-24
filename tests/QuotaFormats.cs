@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Web;
+using System.Windows.Automation;
+using System.Windows.Forms;
 using KeyIsle;
 
 internal static class QuotaFormats
@@ -57,9 +59,64 @@ internal static class QuotaFormats
         Check(ag.windows.Count == 2 && ag.windows[0].remaining == 79 && ag.windows[0].reset == 1798761600000, "Antigravity group quota");
         Check(ag.windows[1].remaining == 0, "Zero is a genuine remaining fraction");
         Check(QuotaData.Antigravity(json.DeserializeObject(@"{""status"":""ERROR"",""usage"":{""total_tokens"":1000}}")).windows.Count == 0, "No token substitution");
-        try { CheckLogin(); }
+        try { CheckLogin(); CheckDesktopProfile(); CheckWelcome(); }
         finally { if (Directory.Exists(home)) Directory.Delete(home, true); }
-        Console.WriteLine("Quota formats and console-only OAuth submission, rejection, expiry, retry and session isolation passed.");
+        Console.WriteLine("Quota formats, authorization retries, desktop profile pinning and native sign-in actions passed.");
+    }
+
+    private static void CheckWelcome()
+    {
+        using (var shown = new ManualResetEventSlim())
+        using (var clicked = new ManualResetEventSlim())
+        {
+            Form form = null;
+            IntPtr hwnd = IntPtr.Zero;
+            var ui = new Thread(() => {
+                using (form = new Form { Text = "Isolated login fixture", ShowInTaskbar = false })
+                {
+                    var heading = new Label { Text = "Welcome to Antigravity!", Dock = DockStyle.Top };
+                    var button = new Button { Text = "Continue with Google", Dock = DockStyle.Bottom };
+                    form.Controls.Add(heading);
+                    form.Controls.Add(button);
+                    button.Click += (sender, args) => clicked.Set();
+                    form.Shown += (sender, args) => { hwnd = form.Handle; shown.Set(); };
+                    Application.Run(form);
+                }
+            });
+            ui.SetApartmentState(ApartmentState.STA);
+            ui.IsBackground = true;
+            ui.Start();
+            Check(shown.Wait(5000), "Test welcome window did not appear");
+            try
+            {
+                var window = AutomationElement.FromHandle(hwnd);
+                Check(WebQuota.InspectGoogleWindow(window, "antigravity-app", "one@example.invalid", false) == "out" && !clicked.IsSet,
+                    "Refreshing quota must report the welcome screen without invoking sign-in");
+                Check(WebQuota.InspectGoogleWindow(window, "antigravity-app", "one@example.invalid", true) == "signInStarted" && clicked.Wait(3000),
+                    "Explicit desktop login must invoke the official welcome button");
+            }
+            finally { form.BeginInvoke(new Action(form.Close)); ui.Join(5000); }
+        }
+    }
+
+    private static void CheckDesktopProfile()
+    {
+        string id = Guid.NewGuid().ToString("D");
+        const string client = "antigravity-app";
+        string root = AntigravityLogin.Base(id, client);
+        string legacy = Guid.NewGuid().ToString("D");
+        string legacyPath = Path.Combine(root, "Sessions", legacy);
+        Directory.CreateDirectory(Path.Combine(legacyPath, "UserData"));
+        File.WriteAllText(Path.Combine(root, "active-session"), legacy);
+        Check(AntigravityLogin.DesktopProfile(id, client) == legacyPath, "Existing desktop profile must be adopted");
+        string replacement = Guid.NewGuid().ToString("D");
+        Directory.CreateDirectory(Path.Combine(root, "Sessions", replacement, "Home"));
+        File.WriteAllText(Path.Combine(root, "active-session"), replacement);
+        Check(AntigravityLogin.DesktopProfile(id, client) == legacyPath, "Renewing quotas must not move a desktop session");
+        Check(AntigravityLogin.Active(id, client) != legacyPath, "Quota CLI follows its own authorization");
+        string second = Guid.NewGuid().ToString("D");
+        Check(AntigravityLogin.DesktopProfile(second, client) == AntigravityLogin.Base(second, client), "Desktop opens before any CLI authorization");
+        Check(!File.Exists(Path.Combine(AntigravityLogin.Base(second, client), "active-session")), "Opening the desktop must not manufacture quota authorization");
     }
 
     private static void Phase(AntigravityLogin login, Account account, string expected)

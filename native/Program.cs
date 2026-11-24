@@ -11,7 +11,7 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle(KeyIsle.Program.DisplayName)]
 [assembly: AssemblyProduct(KeyIsle.Program.DisplayName)]
 [assembly: AssemblyDescription("个人账号管理")]
-[assembly: AssemblyVersion("1.3.0.0")]
+[assembly: AssemblyVersion("1.3.1.0")]
 
 namespace KeyIsle
 {

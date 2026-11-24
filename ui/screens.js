@@ -217,8 +217,8 @@ export function paintScreen(vault, screen) {
       break;
     case 'google-login': {
       const account = vault.accounts.find(a => a.id === screen.id);
-      content.innerHTML = frame('登录 Antigravity', `<div class="group-preview color-sky">${accountIcon(account)}<div><strong>${escape(account.name)}</strong><p class="sheet-desc">${escape(account.login)}</p></div></div>
-        <p class="google-login-status sheet-desc" id="google-login-status" role="status">正在生成此账号专属的 Google 授权请求…</p>
+      content.innerHTML = frame('授权 Antigravity 额度查询', `<div class="group-preview color-sky">${accountIcon(account)}<div><strong>${escape(account.name)}</strong><p class="sheet-desc">${escape(account.login)}</p></div></div>
+        <p class="google-login-status sheet-desc" id="google-login-status" role="status">正在生成额度查询授权请求…</p>
         <small class="field-hint" id="google-deadline" hidden></small>
         <div id="google-code-box" hidden><button type="button" class="text-button" data-action="google-browser">${icon('box-arrow-up-right')}重新打开授权窗口</button>
           <details class="group-members"><summary>Google 页面显示了授权码${icon('chevron-down')}</summary>
@@ -229,7 +229,7 @@ export function paintScreen(vault, screen) {
         <button type="button" class="secondary" data-action="back">关闭</button>
         <button type="button" class="text-button" id="google-cancel" data-action="google-cancel">取消本次授权</button>
         <button type="button" class="primary" id="google-retry" data-action="google-retry" hidden>重新获取授权码</button>
-        <button type="button" class="primary" id="google-open" data-action="launch-agent" data-id="${account.id}" hidden>打开 ${escape(getClient(account.agentClient).label)}</button></div>`);
+        <button type="button" class="primary" id="google-open" data-action="desktop-signin" data-id="${account.id}" hidden>继续到桌面客户端</button></div>`);
       break;
     }
     case 'quota-import':

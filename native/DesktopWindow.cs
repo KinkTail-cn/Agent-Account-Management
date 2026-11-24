@@ -192,21 +192,14 @@ namespace KeyIsle
                     case "launchAgent":
                         var selection = (Dictionary<string, object>)payload;
                         var target = store.Load().accounts.First(a => a.id == (string)selection["id"]);
-                        value = agents.Launch(target, (bool)selection["login"]);
+                        bool login = (bool)selection["login"];
+                        bool focused = agents.Launch(target, login);
+                        value = focused;
                         if (AntigravityLogin.IsGoogle(target.agentClient))
                         {
-                            bool ownsWindow = await System.Threading.Tasks.Task.Run(() => {
-                                var timer = Stopwatch.StartNew();
-                                do
-                                {
-                                    if (WebQuota.WindowsFor(target.id, target.agentClient).Count != 0) return true;
-                                    System.Threading.Thread.Sleep(300);
-                                } while (timer.ElapsedMilliseconds < 16000);
-                                return false;
-                            });
-                            if (!ownsWindow) throw new InvalidOperationException("目标账号的独立窗口尚未就绪，请再试一次。");
-                            string who = await System.Threading.Tasks.Task.Run(() => WebQuota.GoogleWindowIdentity(target.id, target.agentClient, target.login));
-                            if (who == "mismatch") throw new InvalidOperationException("桌面客户端显示了其他账号，请点击该账号旁的「重新登录」。");
+                            string desktop = await System.Threading.Tasks.Task.Run(() => WebQuota.AwaitDesktop(target, login));
+                            quotas.Forget(target.id, target.agentClient);
+                            value = new { focused = focused, desktop = desktop };
                         }
                         break;
                     case "codes":

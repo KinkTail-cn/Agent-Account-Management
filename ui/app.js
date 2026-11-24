@@ -4,7 +4,7 @@ import {byId, escape, icon} from './components.js';
 import {renderLibrary} from './library.js';
 import {paintScreen, readAccountForm, syncSettings} from './screens.js';
 import {refreshCodes} from './codes.js';
-import {syncQuotaPanels, invalidateQuota, refreshQuota} from './quota.js';
+import {syncQuotaPanels, invalidateQuota, refreshQuota, desktopStarted} from './quota.js';
 import {defaultClient, detectClients, getClient, hasProjectFolder, selectProvider, setFolder, updateClientChoice} from './agents.js';
 
 const dialog = byId('sheet');
@@ -413,7 +413,6 @@ async function handleAction(button) {
       break;
     case 'quota-refresh': await refreshQuota(id); break;
     case 'quota-link':
-    case 'google-relogin':
       await beginGoogle(id);
       break;
     case 'google-retry':
@@ -458,19 +457,28 @@ async function handleAction(button) {
       setFolder(null);
       break;
     case 'agent-login':
+    case 'desktop-signin':
     case 'launch-agent': {
       const account = findAccount(id);
-      if (account.agentClient?.startsWith('antigravity')) {
-        const status = await native('googleLoginState', id);
-        if (!status.hasActive || ['starting', 'authorizing', 'verifying'].includes(status.phase)) { await beginGoogle(id); break; }
-      }
-      let focused;
+      const google = account.agentClient?.startsWith('antigravity');
+      const welcome = google && (action === 'desktop-signin' || !account.agentLastOpened);
+      if (welcome) notice('正在打开此账号的桌面登录窗口…');
+      let launched;
       await commit(async next => {
-        focused = await native('launchAgent', {id, login: action === 'agent-login'});
+        launched = await native('launchAgent', {id, login: welcome || action === 'agent-login'});
+        if (google) desktopStarted(id, account.agentClient, launched.desktop);
         next.accounts.find(a => a.id === id).agentLastOpened = Date.now();
       }, () => {
         if (current()?.kind === 'google-login') closeSheet();
-        notice(focused ? '已切换到账号窗口' : '已打开 ' + getClient(findAccount(id).agentClient).label);
+        const desktopMessage = google && {
+          signInStarted: '已启动桌面登录，请在浏览器选择对应账号。',
+          onboarding: '桌面客户端已进入首次设置，请在窗口中继续。',
+          privacy: '桌面端在等待确认数据使用选项，请在窗口中查看。',
+          out: '桌面仍待登录，请点欢迎页的 Continue with Google。',
+          mismatch: '桌面登录邮箱与当前记录不符，请在客户端切换账号。'
+        }[launched.desktop];
+        notice(desktopMessage || ((google ? launched.focused : launched) ? '已打开该账号的窗口' : '已打开 ' + getClient(account.agentClient).label));
+        if (google && current()?.kind === 'detail') syncQuotaPanels();
       });
       break;
     }
@@ -628,10 +636,10 @@ function paintGoogle(screen, state) {
   if (!status) return;
   const live = ['starting', 'authorizing', 'verifying'].includes(state.phase);
   const messages = {
-    starting: '正在生成此账号专属的 Google 授权请求…',
+    starting: '正在生成此账号的额度查询授权请求…',
     authorizing: `请在 Google 窗口选择 ${findAccount(screen.id).login} 并授权，再粘贴页面显示的授权码。`,
     verifying: '授权码已送达 Antigravity，正在等待验证结果…',
-    ready: 'Google 已完成授权，可以打开这个账号的客户端。',
+    ready: '额度查询已授权。桌面登录请在 Antigravity 窗口完成。',
     cancelled: '本次授权已取消。'
   };
   const message = messages[state.phase] || state.message || '请重新获取授权码。';

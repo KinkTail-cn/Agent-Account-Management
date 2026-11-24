@@ -8,7 +8,7 @@
 2. 软件每天启动时检查一次正式版。也可以点击左下角「软件更新 → 检查更新」。发现新版后，点「下载更新」，校验完成再点「重启并更新」。
 3. 使用 1.2.1 或更早版本时，先退出旧程序，解压并打开首个带更新功能的版本。新程序会读取现有账号库和登录环境。
 
-支持 64 位 Windows 10 和 Windows 11，需要 Microsoft Edge WebView2 Evergreen 运行时。首次使用 Antigravity 时，如果软件提示缺少官方 CLI，可双击压缩包内的 `Install-Antigravity-CLI.cmd` 下载并校验组件。
+支持 64 位 Windows 10 和 Windows 11，需要 Microsoft Edge WebView2 Evergreen 运行时。授权 Antigravity 额度查询时，如果软件提示缺少官方 CLI，可双击压缩包内的 `Install-Antigravity-CLI.cmd` 下载并校验组件。
 
 ## 添加和管理账号
 
@@ -28,7 +28,7 @@
 
 点击「首次打开」并在官方界面完成登录。终端客户端也提供「登录」按钮。以后点击「切换到账号」就会打开该账号的环境。服务商要求重新验证时，在打开的客户端完成即可。使用特定项目的账号可以在编辑页选择项目文件夹。
 
-Antigravity 的「首次登录」会打开这条记录专属的 Google 账号选择页。复制 Google 页面显示的一次性授权码，回到切换器展开「Google 页面显示了授权码」，粘贴后点击「提交给 Antigravity」。窗口会显示验证进度。通过后点击「打开 Antigravity」。如果请求超时或 Google 拒绝了旧码，点「重新获取授权码」，从新页面复制新码。已有记录曾打开了其他账号时，可点「重新登录」。新授权成功后才会切换已有登录环境。
+Antigravity 的「首次登录」会打开此账号的桌面客户端。欢迎页上的 **Continue with Google** 会发起桌面登录。选择对应的 Google 账号并完成授权，然后回到发起登录的 Antigravity 窗口。出现职业选择时可以点 **Skip**。请按自己的意愿设置数据使用选项，再点 **Continue**。以后点「切换到账号」会打开同一个桌面环境。已有记录显示「桌面待登录」时，可点「继续桌面登录」。[Google 桌面登录说明](https://antigravity.google/docs/install)
 
 登录状态由客户端保存在 `%LOCALAPPDATA%\KeyIsle\AgentProfiles` 下，每个账号由固定标识区分，改名或修改分组后仍使用原来的目录。切换器显示的是客户端打开时间，实际登录身份以客户端的账号菜单为准。删除账号库记录会保留客户端资料，可先在对应客户端退出登录。
 
@@ -40,7 +40,7 @@ Antigravity 的「首次登录」会打开这条记录专属的 Google 账号选
 
 - **ChatGPT 桌面版和 Codex CLI** 通过该账号的 Codex 配置查询登录状态与 Codex 订阅额度。若客户端返回邮箱，切换器会与账号记录中的邮箱核对。[Codex 额度接口](https://developers.openai.com/codex/app-server)
 - **Claude Code** 通过官方 CLI 确认登录状态。从切换器重新打开终端并正常使用后，支持的订阅会通过状态栏回传额度。5 小时和 7 天共享额度按服务商返回的周期显示。[Claude Code 状态栏](https://code.claude.com/docs/en/statusline)
-- **Antigravity** 完成首次登录后点击「刷新」，即可按模型组查看额度和重置时间。「额度已授权」表示用量查询授权有效。如果桌面客户端把当前邮箱显示在账号菜单中，展开菜单后刷新可以核对该窗口的身份。[Antigravity 用量报告](https://antigravity.google/docs/cli/commands/usage)
+- **Antigravity** 点击「授权额度查询」，在该账号的浏览器中完成 Google 授权。有一次性授权码时将其粘贴到额度授权窗口。点「刷新」查看模型组的额度和重置时间。桌面登录状态和额度授权分别显示。需要核对桌面身份时，展开 Antigravity 账号菜单再点刷新。[Antigravity 用量报告](https://antigravity.google/docs/cli/commands/usage)
 - **网页窗口** 点击「官方用量页」，待数字显示后保持该窗口打开，在切换器点击「刷新」。也可以复制用量页文字，点击「摘录用量」保存。页面摘录会标明手动来源。
 
 普通账号和 Agent 账号都可在「编辑账号 → 账号状态」手动标记为正常、异常或停用。原有记录默认显示为未标记。

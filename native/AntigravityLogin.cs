@@ -31,6 +31,7 @@ namespace KeyIsle
         }
 
         private readonly Dictionary<string, Attempt> pending = new Dictionary<string, Attempt>();
+        private static readonly object DesktopProfileLock = new object();
         private readonly object gate = new object();
         private readonly Func<string> findCli;
         private readonly Action<string, string> openBrowser;
@@ -59,6 +60,54 @@ namespace KeyIsle
             if (!Guid.TryParseExact(File.ReadAllText(pointer), "D", out g))
                 throw new InvalidDataException("登录环境无法识别，请重新登录这个账号。");
             return Path.Combine(root, "Sessions", g.ToString("D"));
+        }
+
+        // A /usage authorization can rotate active-session. Pin the desktop separately so its
+        // window, OAuth callback and workspace keep using the same profile on the next launch.
+        internal static string DesktopProfile(string id, string client)
+        {
+            lock (DesktopProfileLock)
+            {
+                string root = Base(id, client);
+                Directory.CreateDirectory(root);
+                string pointer = Path.Combine(root, "desktop-profile");
+                string name;
+                if (File.Exists(pointer)) name = File.ReadAllText(pointer).Trim();
+                else
+                {
+                    name = LegacyDesktop(root);
+                    string temp = Path.Combine(root, "desktop-" + Guid.NewGuid().ToString("N") + ".tmp");
+                    try
+                    {
+                        File.WriteAllText(temp, name);
+                        try { File.Move(temp, pointer); }
+                        catch (IOException) { if (!File.Exists(pointer)) throw; name = File.ReadAllText(pointer).Trim(); }
+                    }
+                    finally { if (File.Exists(temp)) File.Delete(temp); }
+                }
+                if (name == "base") return root;
+                Guid generation;
+                if (!Guid.TryParseExact(name, "D", out generation)) throw new InvalidDataException("此账号的桌面环境标识无效。");
+                return Path.Combine(root, "Sessions", generation.ToString("D"));
+            }
+        }
+
+        private static string LegacyDesktop(string root)
+        {
+            string sessions = Path.Combine(root, "Sessions");
+            string oldPointer = Path.Combine(root, "active-session");
+            Guid current;
+            if (File.Exists(oldPointer) && Guid.TryParseExact(File.ReadAllText(oldPointer).Trim(), "D", out current)
+                && Directory.Exists(Path.Combine(sessions, current.ToString("D"), "UserData"))) return current.ToString("D");
+            if (Directory.Exists(Path.Combine(root, "UserData")) || !Directory.Exists(sessions)) return "base";
+            // Older versions could leave a working desktop behind when just the CLI was reauthorized.
+            foreach (var dir in new DirectoryInfo(sessions).EnumerateDirectories().OrderByDescending(d => d.LastWriteTimeUtc))
+            {
+                Guid previous;
+                if (Guid.TryParseExact(dir.Name, "D", out previous) && Directory.Exists(Path.Combine(dir.FullName, "UserData")))
+                    return previous.ToString("D");
+            }
+            return "base";
         }
 
         internal static bool HasBoundSession(Account account)

@@ -52,7 +52,7 @@ def application(playwright, profile, screenshots):
         port = sock.getsockname()[1]
     endpoint = f'http://127.0.0.1:{port}'
     env = dict(os.environ, LOCALAPPDATA=str(profile), WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=f'--remote-debugging-port={port}')
-    process = subprocess.Popen([str(EXE)], env=env)
+    process = subprocess.Popen([str(EXE)], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     page = None
     try:
         for _ in range(120):

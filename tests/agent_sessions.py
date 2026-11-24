@@ -85,9 +85,11 @@ def check_google_first_login(page, root, label, client, email):
     row = page.locator('.session-row').filter(has_text=label)
     button = desktop.action(row, 'launch-agent')
     id_ = button.get_attribute('data-id')
-    button.click()
+    consent = desktop.action(row, 'quota-link')
+    row.scroll_into_view_if_needed()
+    consent.click()
     sheet = page.locator('#sheet')
-    expect(sheet.locator('#sheet-title')).to_have_text('登录 Antigravity')
+    expect(sheet.locator('#sheet-title')).to_have_text('授权 Antigravity 额度查询')
     expect(sheet.locator('#google-code-box')).to_be_visible(timeout=25000)
     folder = root / 'KeyIsle/AgentProfiles' / id_ / client
     browsers = list(folder.glob('Sessions/*/GoogleSignIn'))

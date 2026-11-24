@@ -48,6 +48,12 @@ namespace KeyIsle
 
         internal static bool Known(string client) { return Clients.Any(c => c.id == client); }
 
+        internal static string InstalledPath(string client)
+        {
+            var descriptor = Clients.FirstOrDefault(c => c.id == client);
+            return descriptor == null ? null : descriptor.Locate();
+        }
+
         internal static object Catalog()
         {
             return Clients.Select(c => new { c.id, c.provider, c.label, available = c.Locate() != null }).ToArray();
@@ -133,9 +139,10 @@ namespace KeyIsle
             start.EnvironmentVariables["XDG_DATA_HOME"] = DirectoryAt(home, @".local\share");
             start.EnvironmentVariables["CLOUDSDK_CONFIG"] = DirectoryAt(home, @".config\gcloud");
             start.EnvironmentVariables["ANTIGRAVITY_GEMINI_DIR"] = DirectoryAt(home, ".gemini");
-            // Use the vendor's remote/file-backed login mode in this child and its language server.
-            start.EnvironmentVariables["SSH_TTY"] = "key-isle-profile";
-            start.EnvironmentVariables["AGY_CLI_FORCE_FILE_TOKEN_STORAGE"] = "true";
+            // The desktop owns a local browser callback. Restrict manual/SSH auth to the quota CLI.
+            foreach (string variable in new[] { "SSH_TTY", "SSH_CLIENT", "SSH_CONNECTION",
+                "AGY_CLI_FORCE_FILE_TOKEN_STORAGE", "AGY_CLI_INTERACTIVE_HEADLESS", "AGY_CLI_NONINTERACTIVE_HEADLESS" })
+                start.EnvironmentVariables.Remove(variable);
             start.EnvironmentVariables.Remove("AGY_ADC_AUTH");
             start.EnvironmentVariables.Remove("ANTIGRAVITY_WSL_DISTRO");
             start.EnvironmentVariables.Remove("JETSKI_LS_PORT");
@@ -157,7 +164,7 @@ namespace KeyIsle
             if (client == null) throw new InvalidDataException("请先为这个账号选择客户端。");
             string executable = client.Locate();
             if (executable == null) throw new InvalidOperationException("未检测到 " + client.label + "。安装后可以重新检测，或在编辑账号中选择其他客户端。");
-            string profile = client.provider == "antigravity" ? AntigravityLogin.Active(account.id, client.id) : DirectoryAt(ProfileRoot(account.id), client.id);
+            string profile = client.provider == "antigravity" ? AntigravityLogin.DesktopProfile(account.id, client.id) : DirectoryAt(ProfileRoot(account.id), client.id);
             bool acceptsFolder = client.id == "codex-cli" || client.id == "claude-code" || client.id == "antigravity-ide";
             string workspace = acceptsFolder ? account.agentFolder : null;
             if (String.IsNullOrEmpty(workspace)) workspace = DirectoryAt(Path.Combine(Program.Home, "Workspaces"), account.id);
@@ -176,6 +183,7 @@ namespace KeyIsle
             // All arguments below are fixed strings or validated filesystem paths.
             start.Arguments = "--user-data-dir=\"" + data + "\"";
             if (client.id == "chatgpt-desktop") start.EnvironmentVariables["CODEX_ELECTRON_USER_DATA_PATH"] = data;
+            if (client.id == "antigravity-app") start.Arguments += " --force-renderer-accessibility";
             if (client.id.EndsWith("-web", StringComparison.Ordinal))
             {
                 string url = client.provider == "chatgpt" ? "https://chatgpt.com/" : "https://claude.ai/";
@@ -216,6 +224,7 @@ namespace KeyIsle
             else
             {
                 SetAntigravityHome(start, profile);
+                start.EnvironmentVariables["SSH_TTY"] = "key-isle-profile";
                 start.EnvironmentVariables["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true";
                 start.EnvironmentVariables["AGY_CLI_FORCE_FILE_TOKEN_STORAGE"] = "true";
                 start.EnvironmentVariables["AGY_CLI_NONINTERACTIVE_HEADLESS"] = "true";
@@ -232,6 +241,8 @@ namespace KeyIsle
         {
             var start = Child(binary, DirectoryAt(Path.Combine(Program.Home, "Quota"), "Working"));
             SetAntigravityHome(start, profile);
+            start.EnvironmentVariables["SSH_TTY"] = "key-isle-profile";
+            start.EnvironmentVariables["AGY_CLI_FORCE_FILE_TOKEN_STORAGE"] = "true";
             start.EnvironmentVariables["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true";
             if (interactive) start.EnvironmentVariables.Remove("AGY_CLI_NONINTERACTIVE_HEADLESS");
             return start;
@@ -266,6 +277,13 @@ namespace KeyIsle
         [DllImport("kernel32.dll")] private static extern IntPtr GetConsoleWindow();
         [DllImport("kernel32.dll")] private static extern bool FreeConsole();
 
+        private static bool FocusWindow(IntPtr window)
+        {
+            if (window == IntPtr.Zero || !IsWindowVisible(window)) return false;
+            if (IsIconic(window)) ShowWindowAsync(window, 9);
+            return SetForegroundWindow(window);
+        }
+
         private static bool Focus(Process process, bool terminal)
         {
             try
@@ -278,9 +296,7 @@ namespace KeyIsle
                     try { window = GetConsoleWindow(); }
                     finally { FreeConsole(); }
                 }
-                if (window == IntPtr.Zero || !IsWindowVisible(window)) return false;
-                if (IsIconic(window)) ShowWindowAsync(window, 9);
-                return SetForegroundWindow(window);
+                return FocusWindow(window);
             }
             catch (InvalidOperationException) { return false; }
             catch (Win32Exception) { return false; }
@@ -292,8 +308,8 @@ namespace KeyIsle
             string key = account.agentClient + "/" + account.id + (terminal && login ? "/login" : "");
             if (AntigravityLogin.IsGoogle(account.agentClient))
             {
-                if (!AntigravityLogin.HasBoundSession(account)) throw new InvalidOperationException("请先点击「首次登录」，完成这个账号的独立登录。");
-                key += "/" + AntigravityLogin.Active(account.id, account.agentClient);
+                key += "/" + AntigravityLogin.DesktopProfile(account.id, account.agentClient);
+                if (WebQuota.WindowsFor(account.id, account.agentClient, true).Any(FocusWindow)) return true;
             }
             Process existing;
             if (launched.TryGetValue(key, out existing) && Focus(existing, terminal)) return true;

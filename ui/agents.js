@@ -78,7 +78,7 @@ function sessionRow(account, groups) {
       ${accountIcon(account)}<span class="account-ident-text"><span class="account-title-line"><strong>${escape(account.name)}</strong>${recordBadge(account)}</span><small>${escape(account.login)}</small></span></button>
     <div class="session-client"><strong>${escape(client.label)}</strong><small>${client.available ? (previous ? '上次打开 ' + escape(new Date(account.agentLastOpened).toLocaleDateString('zh-CN')) : '等待首次打开') : '未检测到客户端'}</small></div>
     ${groupChip(groups.get(account.groupId))}
-    <div class="session-actions">${login}${google && previous ? `<button type="button" class="text-button" data-action="google-relogin" data-id="${account.id}">重新登录</button>` : ''}<button type="button" class="secondary" data-action="launch-agent" data-id="${account.id}"${client.available ? '' : ' disabled'}>${icon('arrow-right')}${label}</button>
+    <div class="session-actions">${login}<button type="button" class="secondary" data-action="launch-agent" data-id="${account.id}"${client.available ? '' : ' disabled'}>${icon('arrow-right')}${label}</button>
       ${iconButton('edit-account', 'pencil', '编辑 ' + account.name, account.id)}</div>${quotaPanel(account)}</article>`;
 }
 
